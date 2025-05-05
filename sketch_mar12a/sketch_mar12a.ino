@@ -1,0 +1,128 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <WiFi.h>
+#include <BlynkSimpleEsp32.h>
+#include <HTTPClient.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+#define sensor 34
+#define buzzer 2
+
+BlynkTimer timer;
+
+// Enter your Auth token
+char auth[] = "Z5PEq8XX-mrcsrAHfMstfd26IPH00ao0";
+
+// Enter your WiFi SSID and password
+char ssid[] = "Galaxy M110896";
+char pass[] = "00000000";
+
+// Notify.lk API Credentials
+const char* notifylk_user_id = "29282";
+const char* notifylk_api_key = "iEFRAqr9ILgi810CWigb";
+const char* notifylk_sender_id = "NotifyDEMO";  // Replace with your approved sender ID
+const char* recipient_number = "0705762745";  // Replace with the recipient's number
+
+bool smsSent = false; // To prevent multiple SMS spam
+
+void setup() {
+    Serial.begin(115200);
+    Blynk.begin(auth, ssid, pass, "blynk.cloud", 80);
+
+    // Initialize OLED display
+    if (!display.begin(SSD1306_BLACK, 0x3C)) {
+        Serial.println("SSD1306 allocation failed");
+        while (true);
+    }
+
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(10, 10);
+    display.println("System Loading...");
+    display.display();
+    
+    pinMode(buzzer, OUTPUT);
+    
+    delay(2000);
+    display.clearDisplay();
+    display.display();
+}
+
+// Function to send SMS via Notify.lk API
+void sendSMS() {
+    if (WiFi.status() == WL_CONNECTED) {
+        HTTPClient http;
+        String url = "https://app.notify.lk/api/v1/send?user_id=" + String(notifylk_user_id) +
+                     "&api_key=" + String(notifylk_api_key) +
+                     "&sender_id=" + String(notifylk_sender_id) +
+                     "&to=" + String(recipient_number) +
+                     "&message=Gas Leak Detected! Take immediate action!";
+        
+        http.begin(url);
+        int httpResponseCode = http.GET();
+
+        if (httpResponseCode > 0) {
+            String response = http.getString();
+            Serial.println("SMS Sent Successfully");
+            Serial.println(response);
+        } else {
+            Serial.print("Error sending SMS: ");
+            Serial.println(httpResponseCode);
+        }
+        http.end();
+    } else {
+        Serial.println("WiFi not connected, unable to send SMS.");
+    }
+}
+
+// Function to read gas level and update display
+void GASLevel() {
+    int value = analogRead(sensor);
+    value = map(value, 0, 4095, 0, 100);
+
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    
+    display.setCursor(10, 10);
+    display.print("GAS Level:");
+    display.setCursor(10, 35);
+    display.print(value);
+    display.print("%");
+
+    if (value >= 50) {
+        digitalWrite(buzzer, HIGH);
+        display.setCursor(10, 55);
+        display.print("Warning!");
+        WidgetLED LED(V1);
+        LED.on();
+
+        if (!smsSent) {  // Send SMS only once
+            sendSMS();
+            smsSent = true; // Prevent multiple SMS spam
+        }
+    } else {
+        digitalWrite(buzzer, LOW);
+        display.setCursor(10, 55);
+        display.print("Normal");
+        WidgetLED LED(V1);
+        LED.off();
+        smsSent = false; // Reset SMS flag if gas level is normal
+    }
+
+    display.display();
+    Blynk.virtualWrite(V0, value);
+    Serial.println(value);
+}
+
+void loop() {
+    GASLevel();
+    Blynk.run(); // Run the Blynk library
+    delay(500);
+}
