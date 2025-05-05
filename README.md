@@ -12,7 +12,7 @@ This project implements a **Gas Leak Detection System** using an **ESP32 microco
 ## **Requirements:**
 - **ESP32 board** 
 - **OLED Display (SSD1306)**
-- **Gas sensor** (e.g., MQ-2)
+- **Gas sensor** (MQ-2)
 - **Buzzer**
 - **Blynk account** 
 
