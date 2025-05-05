@@ -41,6 +41,5 @@ This project implements a **Gas Leak Detection System** using an **ESP32 microco
 5. **Upload the code** to the **ESP32**.
 6. Open the **Blynk app** to monitor gas levels in real-time 📲.
 
-## **License:**
-This project is licensed under the **MIT License**.
+
 
