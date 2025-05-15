@@ -2,6 +2,8 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <WiFi.h>
+#define BLYNK_TEMPLATE_ID "TMPL6cxu4xpHI"
+#define BLYNK_TEMPLATE_NAME "gas leakage detection system"
 #include <BlynkSimpleEsp32.h>
 #include <HTTPClient.h>
 
@@ -16,26 +18,54 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 BlynkTimer timer;
 
 // Enter your Auth token
-char auth[] = "lv1acsTe-o8oA3tp-u9olKE55TcZ9GDm";
+char auth[] = "Z5PEq8XX-mrcsrAHfMstfd26IPH00ao0";
 
 // Enter your WiFi SSID and password
-char ssid[] = "Galaxy M110896";
-char pass[] = "00000000";
+char ssid[] = "vivo 1938";
+char pass[] = "123uresha";
 
 // Notify.lk API Credentials
-const char* notifylk_user_id = "29282";
-const char* notifylk_api_key = "iEFRAqr9ILgi810CWigb";
+const char* notifylk_user_id = "29541";
+const char* notifylk_api_key = "eSp0fCQ2jLICga9Ms0VO";
 const char* notifylk_sender_id = "NotifyDEMO";  // Replace with your approved sender ID
-const char* recipient_number = "0705762745";  // Replace with the recipient's number
+const char* recipient_number = "94764742889";  // Sri Lankan mobile format
 
 bool smsSent = false; // To prevent multiple SMS spam
+bool wifiConnected = false;
 
-WidgetLED gasLED(V1); // Blynk LED Widget
+// Function to URL encode the message
+String urlEncode(String str) {
+  String encodedString = "";
+  char c;
+  char code0;
+  char code1;
+  for (int i = 0; i < str.length(); i++) {
+    c = str.charAt(i);
+    if (c == ' ') {
+      encodedString += '+';
+    } else if (isalnum(c)) {
+      encodedString += c;
+    } else {
+      code1 = (c & 0xf) + '0';
+      if ((c & 0xf) > 9) {
+        code1 = (c & 0xf) - 10 + 'A';
+      }
+      c = (c >> 4) & 0xf;
+      code0 = c + '0';
+      if (c > 9) {
+        code0 = c - 10 + 'A';
+      }
+      encodedString += '%';
+      encodedString += code0;
+      encodedString += code1;
+    }
+  }
+  return encodedString;
+}
 
 void setup() {
     Serial.begin(115200);
-    Blynk.begin(auth, ssid, pass, "blynk.cloud", 80);
-
+    
     // Initialize OLED display
     if (!display.begin(SSD1306_BLACK, 0x3C)) {
         Serial.println("SSD1306 allocation failed");
@@ -51,6 +81,36 @@ void setup() {
     
     pinMode(buzzer, OUTPUT);
     
+    // Connect to WiFi
+    WiFi.begin(ssid, pass);
+    
+    display.setCursor(10, 30);
+    display.println("Connecting to WiFi...");
+    display.display();
+    
+    int wifiAttempts = 0;
+    while (WiFi.status() != WL_CONNECTED && wifiAttempts < 20) {
+        delay(500);
+        Serial.print(".");
+        wifiAttempts++;
+    }
+    
+    if (WiFi.status() == WL_CONNECTED) {
+        wifiConnected = true;
+        display.setCursor(10, 40);
+        display.println("WiFi Connected!");
+        display.display();
+        Serial.println("WiFi connected");
+        
+        // Initialize Blynk after WiFi is connected
+        Blynk.begin(auth, ssid, pass, "blynk.cloud", 80);
+    } else {
+        display.setCursor(10, 40);
+        display.println("WiFi Failed!");
+        display.display();
+        Serial.println("WiFi connection failed");
+    }
+    
     delay(2000);
     display.clearDisplay();
     display.display();
@@ -60,19 +120,25 @@ void setup() {
 void sendSMS(String message) {
     if (WiFi.status() == WL_CONNECTED) {
         HTTPClient http;
+        
+        // URL encode the message
+        String encodedMessage = urlEncode(message);
+        
         String url = "https://app.notify.lk/api/v1/send?user_id=" + String(notifylk_user_id) +
                      "&api_key=" + String(notifylk_api_key) +
                      "&sender_id=" + String(notifylk_sender_id) +
                      "&to=" + String(recipient_number) +
-                     "&message=" + message;
+                     "&message=" + encodedMessage;
 
+        Serial.println("Sending SMS with URL: " + url);
+        
         http.begin(url);
         int httpResponseCode = http.GET();
 
         if (httpResponseCode > 0) {
             String response = http.getString();
-            Serial.println("SMS Sent Successfully");
-            Serial.println(response);
+            Serial.println("SMS Sent Successfully, Response Code: " + String(httpResponseCode));
+            Serial.println("Response: " + response);
         } else {
             Serial.print("Error sending SMS: ");
             Serial.println(httpResponseCode);
@@ -83,52 +149,78 @@ void sendSMS(String message) {
     }
 }
 
-// Function to read gas level and update display
+// Function to read gas level and convert to PPM
 void GASLevel() {
-    int value = analogRead(sensor);
-    int ppm = map(value, 0, 4095, 0, 1000); // Convert to PPM
+    int analogValue = analogRead(sensor);
+    float voltage = analogValue * (3.3 / 4095.0); // Convert ADC value to voltage
+    int ppm = 100 * exp(1.6 * voltage); // Convert voltage to PPM using sensor formula
 
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
     
     display.setCursor(10, 10);
-    display.print("GAS Level:");
+    display.print("Gas Level:");
     display.setCursor(10, 35);
     display.print(ppm);
     display.print(" PPM");
 
-    if (ppm >= 500) {  // Danger level threshold
-        digitalWrite(buzzer, HIGH);  // Beep the buzzer
+    // Alert conditions based on PPM levels
+    if (ppm >= 2000) { // Moderate leak
+        digitalWrite(buzzer, HIGH);
         display.setCursor(10, 55);
-        display.print("Warning!");
-
-        gasLED.on();  // Turn LED Red (Blynk defaults to red)
-        Blynk.setProperty(V1, "color", "#FF0000"); // Red color for danger
-
-        if (!smsSent) {  // Send SMS only once
-            sendSMS("Gas Leak Detected! Take immediate action!");
-            smsSent = true; // Prevent multiple SMS spam
+        display.print("DANGER! Gas Leak!");
+        
+        if (wifiConnected) {
+            WidgetLED LED(V1);
+            LED.on();  // Turn on LED widget (Red for danger)
+        
+            if (!smsSent) {  // Send SMS only once
+                sendSMS("Gas Leak Detected! PPM level: " + String(ppm) + ". Take immediate action!");
+                smsSent = true; // Prevent multiple SMS spam
+                Serial.println("SMS alert triggered");
+            }
         }
-    } else {  // Safe and Normal states
-        digitalWrite(buzzer, LOW);  // Keep buzzer off
+    } 
+    else if (ppm >= 1000) { // Slight leakage
+        digitalWrite(buzzer, LOW);
         display.setCursor(10, 55);
-        display.print("Safe");
-
-        gasLED.on(); // Turn LED Green
-        Blynk.setProperty(V1, "color", "#00FF00"); // Green color for safe
-
-        smsSent = false; // Reset SMS flag if gas level is normal
+        display.print("WARNING: Gas Detected!");
+        
+        if (wifiConnected) {
+            WidgetLED LED(V1);
+            LED.on();  // Turn on LED widget (Orange for slight danger)
+        }
+    } 
+    else { // Normal condition
+        digitalWrite(buzzer, LOW);
+        display.setCursor(10, 55);
+        display.print("Normal Air");
+        
+        if (wifiConnected) {
+            WidgetLED LED(V1);
+            LED.off(); // Turn off LED widget (Green for normal condition)
+        }
+        
+        smsSent = false; // Reset SMS flag when gas levels return to normal
     }
 
     display.display();
-    Blynk.virtualWrite(V0, ppm);  // Update Blynk app with correct PPM value
+    
+    if (wifiConnected) {
+        Blynk.virtualWrite(V0, ppm);
+    }
+    
     Serial.print("PPM: ");
     Serial.println(ppm);
 }
 
 void loop() {
     GASLevel();
-    Blynk.run(); // Run the Blynk library
-    delay(1000);
+    
+    if (wifiConnected) {
+        Blynk.run();
+    }
+    
+    delay(500);
 }
